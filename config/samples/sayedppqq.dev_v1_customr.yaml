@@ -1,0 +1,12 @@
+apiVersion: sayedppqq.dev.sayedppqq.dev/v1
+kind: CustomR
+metadata:
+  labels:
+    app.kubernetes.io/name: customr
+    app.kubernetes.io/instance: customr-sample
+    app.kubernetes.io/part-of: kubebuilder-crd
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: kubebuilder-crd
+  name: customr-sample
+spec:
+  # TODO(user): Add fields here
