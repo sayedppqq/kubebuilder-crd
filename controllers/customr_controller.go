@@ -18,6 +18,9 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,22 +52,105 @@ type CustomRReconciler struct {
 func (r *CustomRReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.WithValues("ReqName", req.Name, "ReqNamespace", req.Namespace)
+	fmt.Println("Reconcile started")
 
 	// TODO(user): your logic here
 
-	// customRInstance have all data of CustomR Resources
-	var customRInstance sayedppqqdevv1.CustomR
-	if err := r.Get(ctx, req.NamespacedName, &customRInstance); err != nil {
-		log.Info("Unable to Fetch customRInstance")
+	// customR have all data of CustomR Resources
+	var customR sayedppqqdevv1.CustomR
+	if err := r.Get(ctx, req.NamespacedName, &customR); err != nil {
+		fmt.Errorf("unable to fetch CustomR")
 		// we'll ignore not-found errors, since they can't be fixed by an immediate
 		// requeue (we'll need to wait for a new notification), and we can get them
 		// on deleted requests.
 		return ctrl.Result{}, nil
 	}
+	fmt.Println("CustomR fetched", req.NamespacedName)
 
-	// deploymentInstance have all data of deployment in specific namespace
+	// deploymentInstance have all data of deployment in specific namespace and name under the controller
 	var deploymentInstance appsv1.Deployment
+	// making deployment name
+	deploymentName := func() string {
+		if customR.Spec.DeploymentName == "" {
+			return customR.Name + "-" + "randomName"
+		} else {
+			return customR.Name + "-" + customR.Spec.DeploymentName
+		}
+	}()
+	//Creating NamespacedName for deploymentInstance
+	obk := client.ObjectKey{
+		Namespace: req.Namespace,
+		Name:      deploymentName,
+	}
 
+	if err := r.Get(ctx, obk, &deploymentInstance); err != nil {
+		if errors.IsNotFound(err) {
+			fmt.Println("could not find existing Deployment for ", customR.Name, ", creating one...")
+			err := r.Client.Create(ctx, newDeployment(&customR, deploymentName))
+			if err != nil {
+				fmt.Errorf("error while creating deployment %s\n", err)
+				return ctrl.Result{}, err
+			} else {
+				fmt.Printf("%s Deployments Created...\n", customR.Name)
+			}
+		} else {
+			fmt.Errorf("error fetching deployment %s\n", err)
+			return ctrl.Result{}, err
+		}
+	} else {
+		if customR.Spec.Replicas != nil && *customR.Spec.Replicas != *deploymentInstance.Spec.Replicas {
+			fmt.Println(*customR.Spec.Replicas, *deploymentInstance.Spec.Replicas)
+			fmt.Println("Deployment replica miss match.....updating")
+			//As the replica count didn't match, we need to update it
+			deploymentInstance.Spec.Replicas = customR.Spec.Replicas
+			if err := r.Update(ctx, &deploymentInstance); err != nil {
+				fmt.Errorf("error updating deployment %s\n", err)
+				return ctrl.Result{}, err
+			}
+			fmt.Println("deployment updated")
+		}
+	}
+
+	var serviceInstance corev1.Service
+	// making service name
+	serviceName := func() string {
+		if customR.Spec.Service.ServiceName == "" {
+			return customR.Name + "-" + "randomName-service"
+		} else {
+			return customR.Name + "-" + customR.Spec.Service.ServiceName + "-service"
+		}
+	}()
+	//Creating NamespacedName for serviceInstance
+	obk = client.ObjectKey{
+		Namespace: req.Namespace,
+		Name:      serviceName,
+	}
+	if err := r.Get(ctx, obk, &serviceInstance); err != nil {
+		if errors.IsNotFound(err) {
+			fmt.Println("could not find existing Service for ", customR.Name, ", creating one...")
+			err := r.Create(ctx, newService(&customR, serviceName))
+			if err != nil {
+				fmt.Errorf("error while creating service %s\n", err)
+				return ctrl.Result{}, err
+			} else {
+				fmt.Printf("%s Service Created...\n", customR.Name)
+			}
+		} else {
+			fmt.Errorf("error fetching service %s\n", err)
+			return ctrl.Result{}, err
+		}
+	} else {
+		if customR.Spec.Replicas != nil && *customR.Spec.Replicas != customR.Status.AvailableReplicas {
+			fmt.Println("Service replica miss match.....updating")
+			customR.Status.AvailableReplicas = *customR.Spec.Replicas
+			if err := r.Status().Update(ctx, &customR); err != nil {
+				fmt.Errorf("error while updating service %s\n", err)
+				return ctrl.Result{}, err
+			}
+			fmt.Println("service updated")
+		}
+	}
+	fmt.Println("reconciliation done")
 	return ctrl.Result{}, nil
 }
 
@@ -72,5 +158,7 @@ func (r *CustomRReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (r *CustomRReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&sayedppqqdevv1.CustomR{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
 		Complete(r)
 }

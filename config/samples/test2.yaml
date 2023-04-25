@@ -7,16 +7,15 @@ metadata:
     app.kubernetes.io/part-of: kubebuilder-crd
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: kubebuilder-crd
-  name: customr-sample
+  name: customr-sample2
 spec:
-  deploymentName: test444444444
-  replicas: 3
+  deploymentName: test
+  replicas: 1
   container:
     image: "sayedppqq/api-server"
     port: 8080
   service:
     serviceName: "sayediiiii"
-    serviceType: "NodePort"
+    serviceType: "ClusterIP"
     servicePort: 8080
-    serviceNodePort: 30001
 
