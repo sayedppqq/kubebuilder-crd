@@ -22,9 +22,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	appsv1 "k8s.io/api/apps/v1"
 	sayedppqqdevv1 "sayedppqq.dev/mycrd/api/v1"
@@ -156,9 +160,51 @@ func (r *CustomRReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *CustomRReconciler) SetupWithManager(mgr ctrl.Manager) error {
+
+	// Main part
+	//return ctrl.NewControllerManagedBy(mgr).
+	//	For(&sayedppqqdevv1.CustomR{}).
+	//	Owns(&appsv1.Deployment{}).
+	//	Owns(&corev1.Service{}).
+	//	Complete(r)
+
+	// Extra part, if want to implement with watches and custom eventHandler
+	// if someone edit the resources(here example given for deployment resource) by kubectl
+	handlerForDeployment := handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
+		// List all the CR
+		customRs := &sayedppqqdevv1.CustomRList{}
+		if err := r.List(context.Background(), customRs); err != nil {
+			return nil
+		}
+		// This func return a reconcile request array
+		var req []reconcile.Request
+		for _, c := range customRs.Items {
+			// Find the deployment owned by the CR
+			if c.Spec.DeploymentName == obj.GetName() && c.Namespace == obj.GetNamespace() {
+				deploy := &appsv1.Deployment{}
+				if err := r.Get(context.Background(), types.NamespacedName{
+					Namespace: obj.GetNamespace(),
+					Name:      obj.GetName(),
+				}, deploy); err != nil {
+					return nil
+				}
+				// Only append to the reconcile request array if replica count miss match.
+				if deploy.Spec.Replicas != c.Spec.Replicas {
+					req = append(req, reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Namespace: c.Namespace,
+							Name:      c.Name,
+						},
+					})
+				}
+
+			}
+		}
+		return req
+	})
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&sayedppqqdevv1.CustomR{}).
-		Owns(&appsv1.Deployment{}).
+		Watches(&source.Kind{Type: &appsv1.Deployment{}}, handlerForDeployment).
 		Owns(&corev1.Service{}).
 		Complete(r)
 }

@@ -7,10 +7,10 @@ metadata:
     app.kubernetes.io/part-of: kubebuilder-crd
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: kubebuilder-crd
-  name: customr-sample2
+  name: customr-sample
 spec:
-  deploymentName: test
-  replicas: 1
+  deploymentName: test2
+  replicas: 2
   container:
     image: "sayedppqq/api-server"
     port: 8080
