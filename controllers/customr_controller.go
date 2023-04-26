@@ -19,19 +19,19 @@ package controllers
 import (
 	"context"
 	"fmt"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	sayedppqqdevv1 "sayedppqq.dev/mycrd/api/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-
-	appsv1 "k8s.io/api/apps/v1"
-	sayedppqqdevv1 "sayedppqq.dev/mycrd/api/v1"
 )
 
 // CustomRReconciler reconciles a CustomR object
@@ -158,17 +158,52 @@ func (r *CustomRReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
+var (
+	deployOwnerKey = ".metadata.controller"
+	svcOwnerKey    = ".metadata.controller"
+	ourApiGVStr    = sayedppqqdevv1.GroupVersion.String()
+	ourKind        = "CustomR"
+)
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *CustomRReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
-	// Main part
-	//return ctrl.NewControllerManagedBy(mgr).
-	//	For(&sayedppqqdevv1.CustomR{}).
-	//	Owns(&appsv1.Deployment{}).
-	//	Owns(&corev1.Service{}).
-	//	Complete(r)
+	// Extra part
+	// Indexing our Owns resource.This will allow for quickly answer the question:
+	// If Owns Resource x is updated, which CustomR are affected?
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &appsv1.Deployment{}, deployOwnerKey, func(object client.Object) []string {
+		// grab the deployment object, extract the owner.
+		deployment := object.(*appsv1.Deployment)
+		owner := metav1.GetControllerOf(deployment)
+		if owner == nil {
+			return nil
+		}
+		// make sure it's a CustomR
+		if owner.APIVersion != ourApiGVStr || owner.Kind != ourKind {
+			return nil
+		}
+		// ...and if so, return it
+		return []string{owner.Name}
+	}); err != nil {
+		return err
+	}
 
-	// Extra part, if want to implement with watches and custom eventHandler
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Service{}, svcOwnerKey, func(object client.Object) []string {
+		svc := object.(*corev1.Service)
+		owner := metav1.GetControllerOf(svc)
+		if owner == nil {
+			return nil
+		}
+		if owner.APIVersion != ourApiGVStr || owner.Kind != ourKind {
+			return nil
+		}
+		return []string{owner.Name}
+	}); err != nil {
+		return err
+	}
+
+	// Extra part
+	// Implementation with watches and custom eventHandler
 	// if someone edit the resources(here example given for deployment resource) by kubectl
 	handlerForDeployment := handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
 		// List all the CR
@@ -179,17 +214,35 @@ func (r *CustomRReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// This func return a reconcile request array
 		var req []reconcile.Request
 		for _, c := range customRs.Items {
+			deploymentName := func() string {
+				if c.Spec.DeploymentName == "" {
+					return c.Name + "-" + "randomName"
+				} else {
+					return c.Name + "-" + c.Spec.DeploymentName
+				}
+			}()
 			// Find the deployment owned by the CR
-			if c.Spec.DeploymentName == obj.GetName() && c.Namespace == obj.GetNamespace() {
+			fmt.Println(obj.GetName(), obj.GetNamespace())
+			if deploymentName == obj.GetName() && c.Namespace == obj.GetNamespace() {
+				fmt.Println("in 1.................")
 				deploy := &appsv1.Deployment{}
 				if err := r.Get(context.Background(), types.NamespacedName{
 					Namespace: obj.GetNamespace(),
 					Name:      obj.GetName(),
 				}, deploy); err != nil {
+					if errors.IsNotFound(err) {
+						req = append(req, reconcile.Request{
+							NamespacedName: types.NamespacedName{
+								Namespace: c.Namespace,
+								Name:      c.Name,
+							},
+						})
+					}
 					return nil
 				}
 				// Only append to the reconcile request array if replica count miss match.
 				if deploy.Spec.Replicas != c.Spec.Replicas {
+					fmt.Println("in 2...................")
 					req = append(req, reconcile.Request{
 						NamespacedName: types.NamespacedName{
 							Namespace: c.Namespace,
@@ -197,8 +250,8 @@ func (r *CustomRReconciler) SetupWithManager(mgr ctrl.Manager) error {
 						},
 					})
 				}
-
 			}
+			fmt.Println("checking..................")
 		}
 		return req
 	})
@@ -207,4 +260,13 @@ func (r *CustomRReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&source.Kind{Type: &appsv1.Deployment{}}, handlerForDeployment).
 		Owns(&corev1.Service{}).
 		Complete(r)
+
+	////////////////////////////////////////////////////////////////
+	// Main part. Simplified. Comment above for simplification.
+	//return ctrl.NewControllerManagedBy(mgr).
+	//	For(&sayedppqqdevv1.CustomR{}).
+	//	Owns(&appsv1.Deployment{}).
+	//	Owns(&corev1.Service{}).
+	//	Complete(r)
+	////////////////////////////////////////////////////////////////
 }
