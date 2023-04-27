@@ -222,14 +222,15 @@ func (r *CustomRReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}
 			}()
 			// Find the deployment owned by the CR
-			fmt.Println(obj.GetName(), obj.GetNamespace())
 			if deploymentName == obj.GetName() && c.Namespace == obj.GetNamespace() {
-				fmt.Println("in 1.................")
 				deploy := &appsv1.Deployment{}
 				if err := r.Get(context.Background(), types.NamespacedName{
 					Namespace: obj.GetNamespace(),
 					Name:      obj.GetName(),
 				}, deploy); err != nil {
+					// This case can happen if somehow deployment gets deleted by
+					// Kubectl command. We need to append new reconcile request to array
+					// to create desired number of deployment again.
 					if errors.IsNotFound(err) {
 						req = append(req, reconcile.Request{
 							NamespacedName: types.NamespacedName{
@@ -237,12 +238,13 @@ func (r *CustomRReconciler) SetupWithManager(mgr ctrl.Manager) error {
 								Name:      c.Name,
 							},
 						})
+						continue
+					} else {
+						return nil
 					}
-					return nil
 				}
 				// Only append to the reconcile request array if replica count miss match.
 				if deploy.Spec.Replicas != c.Spec.Replicas {
-					fmt.Println("in 2...................")
 					req = append(req, reconcile.Request{
 						NamespacedName: types.NamespacedName{
 							Namespace: c.Namespace,
@@ -251,7 +253,6 @@ func (r *CustomRReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					})
 				}
 			}
-			fmt.Println("checking..................")
 		}
 		return req
 	})
